@@ -161,3 +161,7 @@ API routes (loopback-only): `/api/voices`, `/api/tts`, `/api/config` (GET/POST),
 
 MIT — see [LICENSE.md](LICENSE.md). Bundled dependencies and their licenses
 are listed in [THIRD-PARTY-SOFTWARE.md](THIRD-PARTY-SOFTWARE.md).
+
+## Links
+
+Part of the [vhsgreed](https://vhsgreed.win) toolset: data, code, and methods in the open.
