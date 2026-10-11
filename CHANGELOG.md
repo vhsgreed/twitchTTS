@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-11
+
+### Fixed
+
+- Linux: tray icon had no right-click menu (pystray fell back to its xorg
+  backend, which has none). The shell now uses the GTK backend when
+  PyGObject is available: left click opens the window, right click shows
+  Open / Mute / About / Exit, same as Windows. `install_linux.sh` creates
+  the venv with `--system-site-packages` and installs `python3-gi`.
+- Linux: Ctrl+C, `kill` or closing the terminal killed the shell but left
+  the engine running in the background (holding ports 8080/8081 and the
+  audio device). SIGINT/SIGTERM/SIGHUP now take the same path as tray ->
+  Exit, and the engine is tied to the shell so it also exits if the shell
+  is SIGKILLed.
+- Engine subprocess handles SIGTERM like Ctrl+C, releasing the audio
+  device cleanly (also applies to `systemctl --user stop twitchtts`).
+- Tray menu actions ran Tk calls from the tray thread; they are now
+  marshalled onto the Tk main loop.
+
 ## [0.2.3] - 2026-10-11
 
 ### Fixed

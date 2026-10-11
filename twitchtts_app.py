@@ -18,6 +18,7 @@ import json
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -31,7 +32,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 MODE_LABELS = {"Neural (edge-tts)": "edge"}
 if os.name == "nt":
@@ -89,13 +90,29 @@ class TwitchTTSShell:
 
     # ------------------------------------------------------------------ tray
     def _build_tray(self) -> None:
+        if sys.platform.startswith("linux"):
+            # pystray's xorg fallback cannot show menus. AppIndicator (GNOME,
+            # KDE) and GTK StatusIcon can; StatusIcon needs GTK on X11, so
+            # pin GDK to XWayland before pystray imports Gtk.
+            os.environ.setdefault("GDK_BACKEND", "x11")
+            if "PYSTRAY_BACKEND" not in os.environ:
+                # GTK StatusIcon matches Windows: left click opens the window,
+                # right click shows the menu. AppIndicator only has a menu.
+                for backend in ("gtk", "appindicator"):
+                    if _pystray_backend_ok(backend):
+                        os.environ["PYSTRAY_BACKEND"] = backend
+                        break
         import pystray  # GUI dep; only needed in shell mode (not --engine)
 
+        def on_tk(fn):
+            # pystray calls back on its own thread; Tk is single-threaded.
+            return lambda icon=None, item=None: self.root.after(0, fn)
+
         menu = pystray.Menu(
-            pystray.MenuItem("Open", self.open_window, default=True),
-            pystray.MenuItem("Mute", self.toggle_mute, checked=lambda item: self.muted),
-            pystray.MenuItem("About", self.about),
-            pystray.MenuItem("Exit", self.exit_app),
+            pystray.MenuItem("Open", on_tk(self.open_window), default=True),
+            pystray.MenuItem("Mute", on_tk(self.toggle_mute), checked=lambda item: self.muted),
+            pystray.MenuItem("About", on_tk(self.about)),
+            pystray.MenuItem("Exit", on_tk(self.exit_app)),
         )
         self.tray = pystray.Icon(
             "twitchtts", self._tray_image("offline"), "Twitch TTS Engine", menu
@@ -243,12 +260,14 @@ class TwitchTTSShell:
         self.engine = subprocess.Popen(
             engine_command(),
             cwd=BASE_DIR,
+            stdin=subprocess.DEVNULL,  # engine's console prompt must not grab the terminal
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
             creationflags=flags,
+            preexec_fn=_die_with_parent if sys.platform.startswith("linux") else None,
         )
         threading.Thread(target=self._engine_reader, daemon=True).start()
         # Re-read config: the engine creates config.json from the example.
@@ -678,6 +697,8 @@ class TwitchTTSShell:
         ttk.Button(btns, text="Close", command=win.destroy).pack(side="left", padx=4)
 
     def exit_app(self, icon=None, item=None) -> None:
+        if self._stop.is_set():
+            return  # already shutting down (menu + signal, double click)
         self._stop.set()
         if self.engine is not None and self.engine.poll() is None:
             self.engine.terminate()
@@ -685,12 +706,59 @@ class TwitchTTSShell:
                 self.engine.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 self.engine.kill()
-        self.tray.stop()
+        try:
+            self.tray.stop()
+        except Exception:
+            pass
+        self.root.quit()
         self.root.destroy()
+
+    def _install_signal_handlers(self) -> None:
+        """Ctrl+C, kill and closing the terminal quit like tray -> Exit."""
+        def handler(signum, _frame):
+            self.root.after(0, self.exit_app)
+
+        for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+            sig = getattr(signal, name, None)
+            if sig is not None:
+                signal.signal(sig, handler)
+
+        # Python only runs signal handlers between bytecodes; Tk's mainloop
+        # sits in C, so wake the interpreter regularly.
+        def tick():
+            if not self._stop.is_set():
+                self.root.after(250, tick)
+        tick()
 
     def run(self) -> None:
         self.volume_scale.bind("<ButtonRelease-1>", self._volume_released)
+        self._install_signal_handlers()
         self.root.mainloop()
+
+
+def _pystray_backend_ok(name: str) -> bool:
+    try:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk  # noqa: F401
+
+        if name == "appindicator":
+            try:
+                gi.require_version("AyatanaAppIndicator3", "0.1")
+            except ValueError:
+                gi.require_version("AppIndicator3", "0.1")
+        return True
+    except (ImportError, ValueError):
+        return False
+
+
+def _die_with_parent() -> None:
+    """Linux: SIGTERM the engine when the shell process dies for any reason."""
+    import ctypes
+
+    PR_SET_PDEATHSIG = 1
+    ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
 
 
 _SINGLE_INSTANCE_MUTEX = None
@@ -751,12 +819,19 @@ def main() -> None:
         sys.argv = [arg for arg in sys.argv if arg != "--engine"]
         import app
 
+        if hasattr(signal, "SIGTERM"):
+            # Treat terminate() from the shell like Ctrl+C so cleanup runs.
+            signal.signal(signal.SIGTERM, signal.default_int_handler)
         try:
             import asyncio
 
             asyncio.run(app.main())
         except KeyboardInterrupt:
             pass
+        finally:
+            app.tts_executor.shutdown(wait=False)
+            if app.audio_player is not None:
+                app.audio_player.shutdown()
         return
     if not _claim_single_instance():
         sys.exit(0)

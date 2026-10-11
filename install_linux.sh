@@ -22,9 +22,22 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
 
 echo "==> Creating virtualenv at $VENV_DIR"
-python3 -m venv "$VENV_DIR"
+# --system-site-packages: the tray menu needs PyGObject (python3-gi, a system
+# package) for pystray's GTK backend; without it pystray falls back to xorg,
+# which has no right-click menu.
+python3 -m venv --system-site-packages "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
 "$VENV_DIR/bin/pip" install -r "$REPO_DIR/requirements-linux.txt"
+
+# Tray menu: PyGObject + GTK3 (system packages, not pip-installable).
+if command -v apt-get >/dev/null 2>&1 && ! python3 -c "import gi; gi.require_version('Gtk','3.0')" 2>/dev/null; then
+    echo "==> Installing python3-gi + gir1.2-gtk-3.0 (needed for the tray menu)"
+    if sudo -n true 2>/dev/null; then
+        sudo apt-get install -y python3-gi gir1.2-gtk-3.0 >/dev/null 2>&1 || echo "    (could not install; tray will have no menu)"
+    else
+        echo "    sudo not available passwordlessly - install manually: sudo apt-get install python3-gi gir1.2-gtk-3.0"
+    fi
+fi
 
 # The tray window needs Tk; it is a system package (not pip-installable).
 if command -v apt-get >/dev/null 2>&1 && ! python3 -c "import tkinter" 2>/dev/null; then

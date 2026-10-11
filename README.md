@@ -5,7 +5,7 @@ tray, plays through your speakers — made for stream overlays and local
 monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.3-green)
+![Version](https://img.shields.io/badge/version-0.2.4-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-important)
 
 ## Features
@@ -117,8 +117,9 @@ engine via a hidden `--engine` flag.
 
 ## Linux / headless server
 
-The app runs on Linux: the full tray app on desktop (needs an X display,
-python3-tk and a tray backend), or a headless engine service on servers.
+The app runs on Linux: the full tray app on desktop (needs an X display or
+XWayland, python3-tk, and python3-gi for the tray right-click menu; left click
+opens the window, right click shows Open/Mute/About/Exit as on Windows), or a headless engine service on servers.
 Windows-only bits: SAPI system voices (the engine falls back to edge and
 the mode selector hides "System (offline)") and host-audio playback on
 headless machines (audio plays in the browser UI instead).

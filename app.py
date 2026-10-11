@@ -1267,6 +1267,11 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    import signal
+
+    if hasattr(signal, "SIGTERM"):
+        # terminate()/systemctl stop: same clean shutdown path as Ctrl+C.
+        signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
