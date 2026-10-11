@@ -5,7 +5,7 @@ tray, plays through your speakers — made for stream overlays and local
 monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.1-green)
+![Version](https://img.shields.io/badge/version-0.2.3-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-important)
 
 ## Features
@@ -30,7 +30,7 @@ monitoring.
 
 ### Standalone exe (recommended)
 
-Download `twitchTTS.exe` from the [latest release](https://github.com/karlsune/twitchTTS/releases)
+Download `twitchTTS.exe` from the [latest release](https://github.com/vhsgreed/twitchTTS/releases)
 and run it. First launch creates `config.json` in `%APPDATA%\TwitchTTS`;
 open the window and use **Options...** to set your channel.
 

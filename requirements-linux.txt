@@ -3,6 +3,7 @@
 # package, see install_linux.sh).
 edge-tts>=6.1.12
 miniaudio>=1.63
+pygame-ce>=2.5.8
 pystray>=0.19
 pillow>=10.0
 python-xlib>=0.33

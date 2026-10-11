@@ -31,7 +31,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.2.1"
+VERSION = "0.2.3"
 
 MODE_LABELS = {"Neural (edge-tts)": "edge"}
 if os.name == "nt":
@@ -45,6 +45,7 @@ BASE_DIR = os.path.dirname(
 
 COLORS = {
     "ok": (46, 160, 67),
+    "starting": (210, 160, 30),
     "error": (200, 50, 50),
     "offline": (140, 140, 140),
 }
@@ -114,9 +115,9 @@ class TwitchTTSShell:
         return img
 
     def _refresh_tray(self) -> None:
-        suffix = " — muted" if self.muted else ""
+        suffix = " - muted" if self.muted else ""
         self.tray.icon = self._tray_image(self.state, self.muted)
-        self.tray.title = f"Twitch TTS Engine — {self.state}{suffix}"
+        self.tray.title = f"Twitch TTS Engine - {self.state}{suffix}"
         self.tray.update_menu()
 
     def _set_state(self, state: str) -> None:
@@ -159,6 +160,11 @@ class TwitchTTSShell:
             values=list(MODE_LABELS.keys()),
         )
         self.mode_box.pack(side="left", padx=6)
+        self.mode_var.set(next(iter(MODE_LABELS)))
+        if len(MODE_LABELS) < 2:
+            # Only one engine on this OS: a one-item dropdown renders as an
+            # empty collapsed popdown on Linux Tk, so show it read-only.
+            self.mode_box.config(state="disabled")
         self.mode_box.bind("<<ComboboxSelected>>", self._mode_selected)
 
         body = ttk.Frame(frame)
@@ -251,7 +257,7 @@ class TwitchTTSShell:
         self.stream_port = int(cfg.get("stream_port", 8081))
         self.close_to_tray = bool(cfg.get("close_to_tray", True))
         self._apply_close_behavior()
-        threading.Thread(target=self._load_voices, daemon=True).start()
+        threading.Thread(target=self._load_voices, kwargs={"retries": 45}, daemon=True).start()
 
     def _apply_close_behavior(self) -> None:
         """Close button minimizes to tray or exits the whole app, per config."""
@@ -299,7 +305,11 @@ class TwitchTTSShell:
                 self.root.after(0, lambda: self.status_label.config(text="● offline", foreground="#8c8c8c"))
             else:
                 status = self._api("/api/status")
-                if status is None:
+                if status is None and self.engine is not None:
+                    # Process alive but API not listening yet: still booting.
+                    self._set_state("starting")
+                    self.root.after(0, lambda: self.status_label.config(text="● starting…", foreground="#d2a01e"))
+                elif status is None:
                     self._set_state("offline")
                     self.root.after(0, lambda: self.status_label.config(text="● offline", foreground="#8c8c8c"))
                 else:
@@ -307,9 +317,10 @@ class TwitchTTSShell:
                     self._set_state(state)
                     text = {
                         "ok": "● engine running",
+                        "starting": "● starting…",
                         "error": "● error — check log",
                     }.get(state, "● offline")
-                    color = {"ok": "#2ea043", "error": "#c83232"}.get(state, "#8c8c8c")
+                    color = {"ok": "#2ea043", "starting": "#d2a01e", "error": "#c83232"}.get(state, "#8c8c8c")
                     self.root.after(0, lambda t=text, c=color: self.status_label.config(text=t, foreground=c))
             self._stop.wait(2.0)
 
@@ -343,6 +354,10 @@ class TwitchTTSShell:
                 self.root.after(0, self._load_voices)
             if voice:
                 self.root.after(0, lambda v=voice: self._select_voice(v))
+        elif etype == "voices":
+            voices = evt.get("voices") or []
+            if voices:
+                threading.Thread(target=self._apply_voices, args=(voices,), daemon=True).start()
         elif etype == "now_playing":
             self.root.after(0, lambda: self.now_label.config(text=f"{evt.get('user', '')}: {evt.get('text', '')}"))
         elif etype == "control":
@@ -393,22 +408,19 @@ class TwitchTTSShell:
     def _volume_released(self, _event=None) -> None:
         self._post("/api/control", {"action": "volume", "value": self.volume_var.get() / 100.0})
 
-    def _load_voices(self) -> None:
+    def _load_voices(self, retries: int = 0) -> None:
         data = self._api("/api/voices")
+        # The engine takes a while to come up (emote + voice lists load
+        # first); the startup call retries until the API answers.
+        while not data and retries > 0 and not self._stop.is_set():
+            retries -= 1
+            self._stop.wait(2.0)
+            data = self._api("/api/voices")
         if not data:
             return
-        names = [
-            v.get("ShortName") or v.get("Name")
-            for v in data
-            if isinstance(v, dict) and (v.get("ShortName") or v.get("Name"))
-        ]
-        if names:
-            self.root.after(0, lambda: self.voice_box.config(values=names))
+        self._apply_voices(data)
 
-    def _load_voices(self) -> None:
-        data = self._api("/api/voices")
-        if not data:
-            return
+    def _apply_voices(self, data: list) -> None:
         options = []
         by_label: dict[str, str] = {}
         for v in data:
@@ -619,7 +631,7 @@ class TwitchTTSShell:
                 return
             except OSError:
                 pass
-        webbrowser.open("https://github.com/karlsune/twitchTTS/blob/main/LICENSE.md")
+        webbrowser.open("https://github.com/vhsgreed/twitchTTS/blob/master/LICENSE.md")
 
     def _open_notices(self) -> None:
         notices_path = os.path.join(BASE_DIR, "THIRD-PARTY-SOFTWARE.md")
@@ -630,10 +642,10 @@ class TwitchTTSShell:
                 return
             except OSError:
                 pass
-        webbrowser.open("https://github.com/karlsune/twitchTTS/blob/main/THIRD-PARTY-SOFTWARE.md")
+        webbrowser.open("https://github.com/vhsgreed/twitchTTS/blob/master/THIRD-PARTY-SOFTWARE.md")
 
     def _open_repo(self) -> None:
-        webbrowser.open("https://github.com/karlsune/twitchTTS")
+        webbrowser.open("https://github.com/vhsgreed/twitchTTS")
 
     def about(self, icon=None, item=None) -> None:
         self.root.deiconify()  # dialogs need a viewable parent (tray-only case)

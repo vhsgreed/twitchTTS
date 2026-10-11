@@ -68,24 +68,25 @@ def _apply_fades(pcm: bytes, sample_rate: int, channels: int) -> bytes:
     return data.tobytes()
 
 
-def _mp3_to_wav(mp3_bytes: bytes) -> bytes:
-    """Decode MP3 bytes and wrap the PCM in a WAV container.
+def _mp3_to_pcm(mp3_bytes: bytes) -> bytes:
+    """Decode MP3 bytes to raw signed-16 PCM in the mixer's actual format.
 
-    pygame's ``Sound(buffer=...)`` decodes WAV reliably but turns MP3
-    buffers into loud static noise, so host audio is converted here first.
-    A short fade-in/out is applied to avoid clicks at playback boundaries.
+    ``pygame.mixer.Sound(buffer=...)`` takes *raw samples* in the mixer's
+    format, not a file. Handing it a WAV container made the 44-byte header
+    play as a noise burst, and any rate/channel mismatch between the decoded
+    audio and the mixer changed the pitch (stereo PCM on a mono mixer plays
+    an octave low). Decoding to the mixer's own rate and channel count fixes
+    both. A short fade-in/out is applied to avoid clicks at boundaries.
     """
+    init = pygame.mixer.get_init()
+    rate, channels = (init[0], init[2]) if init else (MIXER_FREQUENCY, MIXER_CHANNELS)
     decoded = miniaudio.decode(
-        mp3_bytes, output_format=miniaudio.SampleFormat.SIGNED16
+        mp3_bytes,
+        output_format=miniaudio.SampleFormat.SIGNED16,
+        nchannels=channels,
+        sample_rate=rate,
     )
-    samples = _apply_fades(decoded.samples, decoded.sample_rate, decoded.nchannels)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wav:
-        wav.setnchannels(decoded.nchannels)
-        wav.setsampwidth(2)
-        wav.setframerate(decoded.sample_rate)
-        wav.writeframes(samples)
-    return buf.getvalue()
+    return _apply_fades(decoded.samples, decoded.sample_rate, decoded.nchannels)
 
 
 class AudioPlayer:
@@ -186,7 +187,7 @@ class AudioPlayer:
                 continue
 
             try:
-                sound = pygame.mixer.Sound(buffer=_mp3_to_wav(mp3_bytes))
+                sound = pygame.mixer.Sound(buffer=_mp3_to_pcm(mp3_bytes))
             except (pygame.error, miniaudio.MiniaudioError, OSError):
                 # Un-decodable or truncated MP3 from a failed synthesis; drop it.
                 continue

@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-11
+
+### Fixed
+
+- Host audio played an octave low (half speed) with a noise burst at the
+  start. pygame's `Sound(buffer=...)` takes raw samples in the mixer's
+  format, but it was handed a stereo WAV file while the mixer runs mono.
+  MP3s are now decoded straight to the mixer's actual rate and channel
+  count.
+- Linux: tray shell crashed on the first status update (`UnicodeEncodeError`;
+  the X11 tray backend encodes titles as Latin-1). Tray title is ASCII now.
+- Linux: host audio silently fell back to browser mode because `pygame-ce`
+  was missing from `requirements-linux.txt`.
+- Voice selector stayed empty when the engine took longer to boot than the
+  shell's single startup request. The shell now retries and also applies
+  the engine's pushed voice list.
+- Engine selector rendered as an empty collapsed menu on Linux, where
+  edge-tts is the only engine. It now shows the engine and is read-only.
+- Status showed "error - check log" while the engine was still booting.
+  New amber "starting" state until the first IRC connect.
+- About/license links pointed to the old repository location.
+
+## [0.2.2] - 2026-08-21
+
 ### Added
 
 - `require_prefix` option: disable the `!tts` prefix requirement entirely.

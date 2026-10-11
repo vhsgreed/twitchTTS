@@ -63,6 +63,7 @@ else:
 ENGINE_STATUS = {
     "started_at": time.time(),
     "irc_connected": False,
+    "ever_connected": False,
     "last_error": None,
     "last_error_at": 0.0,
 }
@@ -240,6 +241,7 @@ def app_log(message: str, level: str = "info") -> None:
         ENGINE_STATUS["last_error_at"] = time.time()
     elif "Connected anonymously" in message:
         ENGINE_STATUS["irc_connected"] = True
+        ENGINE_STATUS["ever_connected"] = True
     elif "IRC connection lost" in message:
         ENGINE_STATUS["irc_connected"] = False
 
@@ -896,7 +898,16 @@ def start_http_server() -> None:
                     ENGINE_STATUS["last_error"] is not None
                     and now - ENGINE_STATUS["last_error_at"] < 60
                 )
-                status = "error" if (not ENGINE_STATUS["irc_connected"] or recent_error) else "ok"
+                if recent_error:
+                    status = "error"
+                elif ENGINE_STATUS["irc_connected"]:
+                    status = "ok"
+                elif not ENGINE_STATUS["ever_connected"]:
+                    # Still booting (emote/voice lists, first IRC connect):
+                    # not an error until something actually fails.
+                    status = "starting"
+                else:
+                    status = "error"
                 body = json.dumps(
                     {
                         "status": status,
