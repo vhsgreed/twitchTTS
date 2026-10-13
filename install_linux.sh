@@ -70,6 +70,23 @@ Terminal=false
 Categories=AudioVideo;Audio;
 Keywords=twitch;tts;chat;stream;
 StartupWMClass=Twitchtts
+Actions=open;mute;about;exit;
+
+[Desktop Action open]
+Name=Open
+Exec=$VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py --open
+
+[Desktop Action mute]
+Name=Mute / Unmute
+Exec=$VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py --mute
+
+[Desktop Action about]
+Name=About
+Exec=$VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py --about
+
+[Desktop Action exit]
+Name=Exit
+Exec=$VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py --exit
 EOF
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$DATA_DIR/icons/hicolor" >/dev/null 2>&1 || true

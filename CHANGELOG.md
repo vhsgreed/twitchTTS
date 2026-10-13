@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-10-13
+
+### Added
+
+- Linux: right-clicking the Twitch TTS icon in the dock or app menu now
+  offers the same Open, Mute / Unmute, About and Exit actions as the tray
+  menu. They act on the running app; Exit with nothing running does nothing.
+  Re-run `install_linux.sh` to update the launcher.
+
 ## [0.2.5] - 2026-10-13
 
 ### Added

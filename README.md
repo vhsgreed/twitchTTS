@@ -5,7 +5,7 @@ tray, plays through your speakers — made for stream overlays and local
 monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.5-green)
+![Version](https://img.shields.io/badge/version-0.2.6-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-important)
 
 ## Features

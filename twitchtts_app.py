@@ -33,7 +33,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.2.5"
+VERSION = "0.2.6"
 
 MODE_LABELS = {"Neural (edge-tts)": "edge"}
 if os.name == "nt":
@@ -737,7 +737,9 @@ class TwitchTTSShell:
         if hasattr(signal, "SIGUSR1"):
             # A second launch (e.g. clicking the dock icon while the window
             # sits in the tray) signals us to show the window and exits.
-            signal.signal(signal.SIGUSR1, lambda *_: self.root.after(0, self.open_window))
+            # The dock's right-click actions (--mute, --about, --exit) write
+            # their command to a file next to the lock before signalling.
+            signal.signal(signal.SIGUSR1, lambda *_: self.root.after(0, self._remote_command))
 
         # Python only runs signal handlers between bytecodes; Tk's mainloop
         # sits in C, so wake the interpreter regularly.
@@ -745,6 +747,15 @@ class TwitchTTSShell:
             if not self._stop.is_set():
                 self.root.after(250, tick)
         tick()
+
+    def _remote_command(self) -> None:
+        action = _read_remote_action()
+        handler = {
+            "mute": self.toggle_mute,
+            "about": self.about,
+            "exit": self.exit_app,
+        }.get(action, self.open_window)
+        handler()
 
     def run(self) -> None:
         self.volume_scale.bind("<ButtonRelease-1>", self._volume_released)
@@ -780,8 +791,36 @@ def _die_with_parent() -> None:
 _SINGLE_INSTANCE_MUTEX = None
 _SINGLE_INSTANCE_LOCK = None
 
+# Command-line actions, matching the tray menu. The Linux .desktop file
+# exposes them as right-click actions on the dock icon.
+REMOTE_ACTIONS = ("open", "mute", "about", "exit")
 
-def _claim_single_instance_posix() -> bool:
+
+def _requested_action() -> str:
+    for action in REMOTE_ACTIONS:
+        if f"--{action}" in sys.argv:
+            return action
+    return "open"
+
+
+def _remote_command_path() -> str:
+    run_dir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return os.path.join(run_dir, f"twitchtts-{os.getuid()}.cmd")
+
+
+def _read_remote_action() -> str:
+    """Read and consume the action a second launch left for us."""
+    try:
+        path = _remote_command_path()
+        with open(path, encoding="utf-8") as fh:
+            action = fh.read().strip()
+        os.remove(path)
+    except (OSError, AttributeError):
+        return "open"
+    return action if action in REMOTE_ACTIONS else "open"
+
+
+def _claim_single_instance_posix(action: str = "open") -> bool:
     """Linux/macOS: flock a lock file holding our pid.
 
     A second instance finds the lock taken, sends SIGUSR1 to the pid in the
@@ -800,6 +839,9 @@ def _claim_single_instance_posix() -> bool:
             try:
                 pid = int(os.read(fd, 32).decode().strip() or 0)
                 if pid > 0:
+                    cmd = _remote_command_path()
+                    with open(os.open(cmd, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+                        fh.write(action)
                     os.kill(pid, signal.SIGUSR1)
             except (ValueError, OSError):
                 pass
@@ -816,7 +858,7 @@ def _claim_single_instance_posix() -> bool:
         return True  # never block startup on a guard failure
 
 
-def _claim_single_instance() -> bool:
+def _claim_single_instance(action: str = "open") -> bool:
     """Claim a process-wide mutex; focus the existing window if one is open.
 
     Returns True when this process may keep running, False when another
@@ -827,7 +869,7 @@ def _claim_single_instance() -> bool:
     """
     global _SINGLE_INSTANCE_MUTEX
     if os.name != "nt":
-        return _claim_single_instance_posix()
+        return _claim_single_instance_posix(action)
     try:
         import ctypes
         from ctypes import wintypes
@@ -885,8 +927,11 @@ def main() -> None:
             if app.audio_player is not None:
                 app.audio_player.shutdown()
         return
-    if not _claim_single_instance():
+    action = _requested_action()
+    if not _claim_single_instance(action):
         sys.exit(0)
+    if action == "exit":
+        sys.exit(0)  # nothing running, nothing to quit
     TwitchTTSShell().run()
 
 
