@@ -6,7 +6,7 @@ monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Version](https://img.shields.io/badge/version-0.2.5-green)
-![Platform](https://img.shields.io/badge/platform-Windows-important)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-important)
 
 ## Features
 
@@ -14,7 +14,7 @@ monitoring.
 - **Two TTS engines** — cloud neural voices via [edge-tts](https://github.com/rany2/edge-tts)
   (default, needs internet) or fully offline Windows SAPI voices; switch live
   in the app
-- **Windows app** — control panel with mute/skip, voice + engine selector,
+- **Desktop app (Windows, Linux)** — control panel with mute/skip, voice + engine selector,
   volume, now-playing, live log, and an Options page for configuration
 - **Minimizable** to tray!
 - **Viewer voice command** — `!voice <name>` lets viewers pick their own
@@ -33,6 +33,11 @@ monitoring.
 Download `twitchTTS.exe` from the [latest release](https://github.com/vhsgreed/twitchTTS/releases)
 and run it. First launch creates `config.json` in `%APPDATA%\TwitchTTS`;
 open the window and use **Options...** to set your channel.
+
+### Linux
+
+Run `./install_linux.sh`, then open **Twitch TTS** from the app menu. See
+[Linux / headless server](#linux--headless-server).
 
 ### From source
 
@@ -74,6 +79,7 @@ your channel in `config.json` (auto-created from `config.example.json`):
 | Icon | Meaning |
 |-----|----------|
 | 🟢 | Engine is OK (normal operation) |
+| 🟡 | Engine starting (API not up or chat not connected yet) |
 | 🔴 | Engine error |
 | ⚪ | Engine is offline |
 | 🔇 |	Muted active |
