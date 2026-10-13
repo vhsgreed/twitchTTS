@@ -21,6 +21,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -32,7 +33,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 
 MODE_LABELS = {"Neural (edge-tts)": "edge"}
 if os.name == "nt":
@@ -144,8 +145,18 @@ class TwitchTTSShell:
 
     # ---------------------------------------------------------------- window
     def _build_window(self) -> None:
-        self.root = tk.Tk()
+        # className sets the X11 WM_CLASS (Tk normalises it to "Twitchtts");
+        # the Linux .desktop launcher's StartupWMClass must match it so the
+        # dock groups the window under the launcher icon.
+        self.root = tk.Tk(className="twitchtts")
         self.root.title("Twitch TTS Engine")
+        try:
+            from PIL import ImageTk
+
+            self._window_icon = ImageTk.PhotoImage(self._tray_image("ok"))
+            self.root.iconphoto(True, self._window_icon)
+        except Exception:
+            pass  # cosmetic only
         self.root.geometry("560x440")
         self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
 
@@ -723,6 +734,11 @@ class TwitchTTSShell:
             if sig is not None:
                 signal.signal(sig, handler)
 
+        if hasattr(signal, "SIGUSR1"):
+            # A second launch (e.g. clicking the dock icon while the window
+            # sits in the tray) signals us to show the window and exits.
+            signal.signal(signal.SIGUSR1, lambda *_: self.root.after(0, self.open_window))
+
         # Python only runs signal handlers between bytecodes; Tk's mainloop
         # sits in C, so wake the interpreter regularly.
         def tick():
@@ -762,6 +778,42 @@ def _die_with_parent() -> None:
 
 
 _SINGLE_INSTANCE_MUTEX = None
+_SINGLE_INSTANCE_LOCK = None
+
+
+def _claim_single_instance_posix() -> bool:
+    """Linux/macOS: flock a lock file holding our pid.
+
+    A second instance finds the lock taken, sends SIGUSR1 to the pid in the
+    file (the running shell then shows its window) and exits.
+    """
+    global _SINGLE_INSTANCE_LOCK
+    try:
+        import fcntl
+
+        run_dir = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+        path = os.path.join(run_dir, f"twitchtts-{os.getuid()}.lock")
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            try:
+                pid = int(os.read(fd, 32).decode().strip() or 0)
+                if pid > 0:
+                    os.kill(pid, signal.SIGUSR1)
+            except (ValueError, OSError):
+                pass
+            os.close(fd)
+            return False
+        # SIGUSR1 terminates by default; ignore it until the shell installs
+        # its handler, so a fast double launch cannot kill this instance.
+        signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+        _SINGLE_INSTANCE_LOCK = fd  # held (and locked) for the process lifetime
+        return True
+    except Exception:
+        return True  # never block startup on a guard failure
 
 
 def _claim_single_instance() -> bool:
@@ -769,13 +821,13 @@ def _claim_single_instance() -> bool:
 
     Returns True when this process may keep running, False when another
     instance is already active (its window was brought to the front and
-    this process should exit). Enforced on Windows only; the guard must
-    not affect ``--engine`` subprocesses, so it is only called from the
-    tray-shell path in ``main()``.
+    this process should exit). Windows uses a named mutex, other systems a
+    lock file. The guard must not affect ``--engine`` subprocesses, so it
+    is only called from the tray-shell path in ``main()``.
     """
     global _SINGLE_INSTANCE_MUTEX
     if os.name != "nt":
-        return True
+        return _claim_single_instance_posix()
     try:
         import ctypes
         from ctypes import wintypes

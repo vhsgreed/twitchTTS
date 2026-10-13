@@ -49,10 +49,33 @@ if command -v apt-get >/dev/null 2>&1 && ! python3 -c "import tkinter" 2>/dev/nu
     fi
 fi
 
-if [ -n "${DISPLAY:-}" ]; then
-    echo "==> Desktop detected. Run the tray app with:"
-    echo "    $VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py"
-    echo "    (config.json is auto-created next to the sources on first run)"
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    # App menu launcher: shows in the app grid, can be pinned to the dock,
+    # and the window groups under it (StartupWMClass = Tk className).
+    DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
+    ICON_DIR="$DATA_DIR/icons/hicolor/scalable/apps"
+    APP_DIR="$DATA_DIR/applications"
+    mkdir -p "$ICON_DIR" "$APP_DIR"
+    install -m 644 "$REPO_DIR/assets/twitchtts.svg" "$ICON_DIR/twitchtts.svg"
+    cat > "$APP_DIR/twitchtts.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Twitch TTS
+GenericName=Chat text-to-speech
+Comment=Read Twitch chat aloud
+Exec=$VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py
+Path=$REPO_DIR
+Icon=twitchtts
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=twitch;tts;chat;stream;
+StartupWMClass=Twitchtts
+EOF
+    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$DATA_DIR/icons/hicolor" >/dev/null 2>&1 || true
+    echo "==> Installed. Open \"Twitch TTS\" from your app menu (right-click it to pin it to the dock)."
+    echo "    Terminal launch still works: $VENV_DIR/bin/python $REPO_DIR/twitchtts_app.py"
+    echo "    Re-run this script after moving the checkout. Remove with ./uninstall_linux.sh"
 else
     SERVICE_NAME="twitchtts"
     UNIT="$HOME/.config/systemd/user/$SERVICE_NAME.service"

@@ -5,7 +5,7 @@ tray, plays through your speakers — made for stream overlays and local
 monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.4-green)
+![Version](https://img.shields.io/badge/version-0.2.5-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-important)
 
 ## Features
@@ -125,12 +125,16 @@ the mode selector hides "System (offline)") and host-audio playback on
 headless machines (audio plays in the browser UI instead).
 
 ```bash
-# installs everything into a venv; on a headless box it also sets up a
-# systemd user service (Ubuntu/Debian-ish):
+# installs everything into a venv. On a desktop it adds a "Twitch TTS"
+# launcher to the app menu (pin it to the dock); on a headless box it sets
+# up a systemd user service instead (Ubuntu/Debian-ish):
 ./install_linux.sh
 
-# desktop: run the tray app
+# desktop: open "Twitch TTS" from the app menu, or from a terminal:
 ~/.local/share/twitchtts/venv/bin/python twitchtts_app.py
+
+# remove launcher, icon, venv and service (keeps the checkout + config):
+./uninstall_linux.sh
 
 # headless logs:
 journalctl --user -u twitchtts -f

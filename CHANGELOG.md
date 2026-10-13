@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-13
+
+### Added
+
+- Linux: `install_linux.sh` now adds a "Twitch TTS" launcher with an icon to
+  the app menu on desktops, so the app can be started and pinned to the dock
+  without a terminal. The window groups under the launcher icon.
+- Linux: `uninstall_linux.sh` removes the launcher, icon, venv and headless
+  service, leaving the checkout and `config.json` in place.
+- Linux: single instance. Launching again while the app runs (for example
+  from the dock while the window is hidden in the tray) shows the existing
+  window instead of starting a second engine that would fight over ports
+  8080/8081. Windows already behaved this way.
+- Window icon matches the tray icon.
+
+### Changed
+
+- `install_linux.sh` also treats a Wayland session as a desktop.
+
 ## [0.2.4] - 2026-10-11
 
 ### Fixed
