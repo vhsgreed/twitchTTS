@@ -33,7 +33,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.2.6"
+VERSION = "0.2.7"
 
 MODE_LABELS = {"Neural (edge-tts)": "edge"}
 if os.name == "nt":

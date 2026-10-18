@@ -1,7 +1,7 @@
 # Linux package. Core (edge TTS + audio decode) works headless; the tray
 # shell needs a desktop with an X display (and the python3-tk system
 # package, see install_linux.sh).
-edge-tts>=6.1.12
+edge-tts>=7.3.1
 miniaudio>=1.63
 pygame-ce>=2.5.8
 pystray>=0.19

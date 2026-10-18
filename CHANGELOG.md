@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-10-18
+
+### Fixed
+
+- Neural voices stopped working: every message failed with
+  `403, message='Invalid response status'` from Microsoft's speech service,
+  which changed its handshake and now rejects edge-tts older than 7.3.0.
+  The requirement is now `edge-tts>=7.3.1`. Windows: download the new exe.
+  Linux: re-run `install_linux.sh` (or `venv/bin/pip install -U edge-tts`)
+  and restart the app.
+
 ## [0.2.6] - 2026-10-13
 
 ### Added
