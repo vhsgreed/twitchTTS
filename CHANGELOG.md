@@ -20,6 +20,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Linux: the window opened too narrow, hiding the volume slider and
   squeezing the engine dropdown. It now sizes itself to its controls.
+- Host audio: the first syllable of Piper messages was cut off ("hello" ->
+  "llo"). The 80 ms start-of-playback mute assumed every clip starts with
+  silence; clips that start sooner are now padded first.
 
 - A daily GitHub Actions workflow checks that neural voices still
   synthesize with the newest edge-tts and raises the `edge-tts>=` pin in
