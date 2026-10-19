@@ -12,3 +12,4 @@ dist/
 build/
 *.spec
 %temp%/
+piper-voices/

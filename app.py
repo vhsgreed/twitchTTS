@@ -31,6 +31,7 @@ from pathlib import Path
 
 import edge_tts
 
+import piper_engine
 from config import get_config_dir, get_config_path, load_config, save_config
 from emotes import fetch_emote_names
 from sanitize import sanitize_chat_text
@@ -104,18 +105,40 @@ audio_state["muted"] = bool(AUDIO_CONFIG.get("muted", False))
 audio_state["volume"] = max(0.0, min(1.0, float(AUDIO_CONFIG.get("volume", 0.8))))
 server_voice = DEFAULT_TTS_VOICE
 
-# TTS engine mode: "edge" (cloud neural) or "system" (Windows SAPI, offline).
-# System mode is Windows-only; fall back to edge elsewhere.
+# TTS engine mode: "edge" (cloud neural), "piper" (offline neural, needs the
+# piper-tts package) or "system" (Windows SAPI, offline).
+TTS_MODES = ("edge", "piper", "system")
+ENGINE_NAMES = {"edge": "edge-tts", "piper": "Piper", "system": "Windows SAPI"}
+
+
+def mode_unsupported(mode: str) -> str | None:
+    """Why ``mode`` cannot run on this machine, or None when it can."""
+    if mode not in TTS_MODES:
+        return f"Unknown TTS mode: {mode}"
+    if mode == "system" and os.name != "nt":
+        return "System TTS mode is Windows-only"
+    if mode == "piper" and not piper_engine.available():
+        return "Piper TTS is not installed (pip install piper-tts)"
+    return None
+
+
 TTS_MODE = str(CONFIG.get("tts_mode", "edge")).lower()
-if TTS_MODE not in ("edge", "system"):
-    TTS_MODE = "edge"
-if TTS_MODE == "system" and os.name != "nt":
+if mode_unsupported(TTS_MODE):
     print(
         f"[{datetime.now().strftime('%H:%M:%S')}] "
-        "System TTS mode is Windows-only; falling back to edge",
+        f"{mode_unsupported(TTS_MODE)}; falling back to edge",
         flush=True,
     )
     TTS_MODE = "edge"
+# When the active engine fails, try the other available engines in
+# TTS_MODES order (edge -> Piper -> SAPI) instead of dropping the message.
+TTS_FALLBACK = bool(CONFIG.get("tts_fallback", True))
+PIPER_VOICE = str(CONFIG.get("piper_voice") or piper_engine.DEFAULT_VOICE)
+PIPER_AUTO_DOWNLOAD = bool(CONFIG.get("piper_auto_download", True))
+# After an edge-tts failure, skip it for this long so every queued message
+# does not wait on a dead service before falling back.
+EDGE_RETRY_SECONDS = 60
+edge_down_until = 0.0
 
 system_voices_cache: list[dict] | None = None
 system_voices_lock = threading.Lock()
@@ -414,10 +437,11 @@ def start_console_controls() -> None:
         ).start()
 
 
-async def generate_tts_audio(text: str, voice: str) -> bytes:
-    """Generate audio bytes with the active TTS engine (edge or system)."""
-    if TTS_MODE == "system":
-        return await asyncio.to_thread(generate_system_tts, text, voice)
+async def generate_edge_tts(text: str, voice: str) -> bytes:
+    """Synthesize MP3 bytes with edge-tts (cloud)."""
+    if not voice or not voice.endswith("Neural"):
+        # Fallback from another engine: its voice names mean nothing here.
+        voice = DEFAULT_TTS_VOICE if DEFAULT_TTS_VOICE.endswith("Neural") else "en-US-JennyNeural"
     communicate = edge_tts.Communicate(text, voice)
     audio = bytearray()
     async for chunk in communicate.stream():
@@ -425,12 +449,97 @@ async def generate_tts_audio(text: str, voice: str) -> bytes:
             data = chunk.get("data")
             if data is not None:
                 audio.extend(data)
+    if not audio:
+        raise RuntimeError("edge-tts returned no audio")
     return bytes(audio)
 
 
+def generate_piper_tts(text: str, voice: str) -> bytes:
+    """Synthesize WAV bytes with Piper (offline)."""
+    name = piper_engine.resolve(voice, PIPER_VOICE)
+    if name is None:
+        raise RuntimeError("no Piper voice installed yet")
+    return piper_engine.synthesize(text, name)
+
+
+TTS_ENGINES = {
+    "edge": lambda text, voice: asyncio.run(generate_edge_tts(text, voice)),
+    "piper": lambda text, voice: generate_piper_tts(text, voice),
+    "system": lambda text, voice: generate_system_tts(text, voice),
+}
+
+
+def engine_chain() -> list[str]:
+    """The active engine first, then the fallbacks that can run here."""
+    chain = [TTS_MODE]
+    if TTS_FALLBACK:
+        chain += [m for m in TTS_MODES if m != TTS_MODE and mode_unsupported(m) is None]
+    return chain
+
+
+def _short_error(exc: Exception) -> str:
+    text = str(exc) or type(exc).__name__
+    text = text.split(", url=")[0]  # edge-tts errors carry a long token URL
+    return text if len(text) <= 160 else text[:157] + "..."
+
+
 def generate_tts_audio_sync(text: str, voice: str) -> bytes:
-    """Expose async TTS generation to the thread-pool HTTP handler."""
-    return asyncio.run(generate_tts_audio(text, voice))
+    """Synthesize with the active engine, falling back down the chain.
+
+    Returns MP3 (edge) or WAV (Piper, SAPI) bytes; the player and the
+    browser both accept either.
+    """
+    global edge_down_until
+    chain = engine_chain()
+    failures: list[str] = []
+    for mode in chain:
+        if mode == "edge" and len(chain) > 1 and time.time() < edge_down_until:
+            continue
+        try:
+            # Voice names are engine-specific: fallbacks use their own default.
+            audio = TTS_ENGINES[mode](text, voice if mode == TTS_MODE else "")
+        except Exception as exc:  # noqa: BLE001 - any failure moves down the chain
+            if mode == "edge":
+                edge_down_until = time.time() + EDGE_RETRY_SECONDS
+            failures.append(f"{ENGINE_NAMES[mode]}: {_short_error(exc)}")
+            continue
+        if mode == "edge":
+            edge_down_until = 0.0
+        if mode != TTS_MODE and failures:
+            app_log(
+                f"{'; '.join(failures)} - spoke with {ENGINE_NAMES[mode]} instead",
+                level="warn",
+            )
+        return audio
+    raise RuntimeError("; ".join(failures) or "no TTS engine available")
+
+
+def prepare_piper() -> None:
+    """Download (if allowed) and load the Piper voice so fallback is instant."""
+    if not piper_engine.available():
+        return
+    try:
+        name = piper_engine.resolve(PIPER_VOICE, PIPER_VOICE)
+        if name != PIPER_VOICE and PIPER_AUTO_DOWNLOAD:
+            piper_engine.ensure_voice(PIPER_VOICE, log=app_log)
+            name = PIPER_VOICE
+        if name is None:
+            app_log(
+                "No Piper voice installed and piper_auto_download is off - "
+                "offline fallback unavailable",
+                level="warn",
+            )
+            return
+        piper_engine.preload(name)
+        app_log(f"Piper offline voice ready: {name}")
+    except Exception as exc:  # noqa: BLE001 - optional engine, never fatal
+        app_log(f"Piper unavailable: {_short_error(exc)}", level="warn")
+        return
+    if TTS_MODE == "piper" and main_loop and main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(
+            broadcast(json.dumps({"type": "voices", "voices": get_active_voices()})),
+            main_loop,
+        )
 
 
 def _no_window_flags() -> int:
@@ -514,9 +623,11 @@ def generate_system_tts(text: str, voice: str) -> bytes:
 
 
 def get_active_voices() -> list[dict]:
-    """The voice list for the active TTS mode (edge or system)."""
+    """The voice list for the active TTS mode."""
     if TTS_MODE == "system":
         return list_system_voices()
+    if TTS_MODE == "piper":
+        return piper_engine.list_voices()
     return get_cached_voices()
 
 
@@ -565,8 +676,8 @@ async def load_third_party_emotes() -> None:
 
 async def preload_voices() -> None:
     """Warm up the voice list cache before handling HTTP requests."""
-    if TTS_MODE == "system":
-        # System voices are local and cheap; load them lazily instead.
+    if TTS_MODE in ("system", "piper"):
+        # Local voices are cheap; load them lazily instead.
         return
     global cached_voices
     try:
@@ -966,6 +1077,10 @@ def start_http_server() -> None:
                     "stream_port": STREAM_PORT,
                     "tts_voice": server_voice,
                     "tts_mode": TTS_MODE,
+                    "tts_modes": [m for m in TTS_MODES if mode_unsupported(m) is None],
+                    "tts_fallback": TTS_FALLBACK,
+                    "piper_voice": PIPER_VOICE,
+                    "piper_voices": piper_engine.installed_voices(),
                     "command_prefix": COMMAND_PREFIX,
                     "require_prefix": REQUIRE_PREFIX,
                     "special_users": sorted(SPECIAL_USERS),
@@ -991,11 +1106,9 @@ def start_http_server() -> None:
                 return
 
             mode = str(body.get("mode", TTS_MODE)).lower()
-            if mode not in ("edge", "system"):
-                self.send_error(400, f"Unknown TTS mode: {mode}")
-                return
-            if mode == "system" and os.name != "nt":
-                self.send_error(400, "System TTS mode is Windows-only")
+            problem = mode_unsupported(mode)
+            if problem:
+                self.send_error(400, problem)
                 return
             mode_changed = mode != TTS_MODE
             TTS_MODE = mode
@@ -1022,7 +1135,7 @@ def start_http_server() -> None:
 
         def _handle_config_save(self):
             """Persist configuration and apply the runtime-only parts immediately."""
-            global CONFIG, server_voice, TTS_MODE
+            global CONFIG, server_voice, TTS_MODE, TTS_FALLBACK, PIPER_VOICE
             global TWITCH_CHANNEL, COMMAND_PREFIX, REQUIRE_PREFIX, SPECIAL_USERS
             global COOLDOWN_SECONDS, MAX_CHARS, QUEUE_SIZE, AUDIO_ENABLED_BY_DEFAULT
             body = self._read_json_body()
@@ -1092,9 +1205,15 @@ def start_http_server() -> None:
                         broadcast(json.dumps({"type": "voice", "voice": server_voice, "mode": TTS_MODE})),
                         main_loop,
                     )
-            if isinstance(merged.get("tts_mode"), str) and merged["tts_mode"].strip() in ("edge", "system"):
+            if isinstance(merged.get("tts_mode"), str) and not mode_unsupported(merged["tts_mode"].strip()):
                 TTS_MODE = merged["tts_mode"].strip()
                 app_log(f"TTS mode set to {TTS_MODE} (from saved config)")
+            TTS_FALLBACK = bool(merged.get("tts_fallback", TTS_FALLBACK))
+            new_piper_voice = str(merged.get("piper_voice") or PIPER_VOICE).strip()
+            if new_piper_voice != PIPER_VOICE:
+                PIPER_VOICE = new_piper_voice
+                app_log(f"Piper voice set to {PIPER_VOICE}")
+                threading.Thread(target=prepare_piper, name="piper-prepare", daemon=True).start()
             if isinstance(audio, dict):
                 if "muted" in audio:
                     set_muted(bool(audio["muted"]))
@@ -1167,7 +1286,9 @@ def start_http_server() -> None:
                 return
 
             self.send_response(200)
-            self.send_header("Content-Type", "audio/mpeg")
+            # Piper and SAPI return WAV, edge-tts MP3.
+            mime = "audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg"
+            self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(audio)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Cache-Control", "no-store")
@@ -1214,6 +1335,8 @@ async def main() -> None:
     app_log("TTS engine starting...")
     load_user_voices()
     threading.Thread(target=start_http_server, daemon=True).start()
+    if TTS_MODE == "piper" or TTS_FALLBACK:
+        threading.Thread(target=prepare_piper, name="piper-prepare", daemon=True).start()
     await load_third_party_emotes()
 
     # Host audio is enabled by default; config and CLI flags can override it.

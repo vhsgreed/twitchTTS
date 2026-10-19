@@ -18,6 +18,12 @@ if exist ".venv\Scripts\python.exe" (
   --hidden-import cffi ^
   --hidden-import _cffi_backend ^
   --hidden-import pystray._win32 ^
+  --hidden-import piper.espeakbridge ^
+  --collect-data piper ^
+  --collect-binaries piper ^
+  --collect-binaries onnxruntime ^
+  --exclude-module piper.train ^
+  --exclude-module torch ^
   twitchtts_app.py
 echo.
 echo Built: dist\twitchTTS.exe

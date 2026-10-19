@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Piper offline neural voices as a third engine ("Piper (offline)"), on
+  Windows (bundled in the exe) and Linux. The default voice,
+  `en_US-joe-medium` (CC0), downloads on first start (~60 MB).
+- Automatic fallback: when edge-tts fails, the message is spoken with Piper
+  (then Windows SAPI) instead of being dropped, and edge-tts is retried a
+  minute later. Turn off with `tts_fallback: false` or in Options.
+- Options: "Fall back to other engines on failure" and "Piper voice".
+
 - A daily GitHub Actions workflow checks that neural voices still
   synthesize with the newest edge-tts and raises the `edge-tts>=` pin in
   the requirements files and README when a newer release passes.

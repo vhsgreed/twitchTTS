@@ -14,6 +14,7 @@ When frozen with PyInstaller the same executable re-runs itself with
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import queue
@@ -35,9 +36,18 @@ from config import get_config_path
 
 VERSION = "0.2.7"
 
+def _piper_installed() -> bool:
+    try:
+        return importlib.util.find_spec("piper") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 MODE_LABELS = {"Neural (edge-tts)": "edge"}
+if _piper_installed():
+    MODE_LABELS["Piper (offline)"] = "piper"
 if os.name == "nt":
-    # Windows SAPI voices are the only offline engine; hide on other OSes.
+    # Windows SAPI voices exist only on Windows; hide on other OSes.
     MODE_LABELS["System (offline)"] = "system"
 MODE_KEYS = {key: label for label, key in MODE_LABELS.items()}
 # Next to the executable when frozen (PyInstaller), next to this file otherwise.
@@ -574,6 +584,16 @@ class TwitchTTSShell:
         close_to_tray_var = tk.BooleanVar(value=bool(cfg.get("close_to_tray", True)))
         add_row("Close button minimizes to tray", ttk.Checkbutton(frame, variable=close_to_tray_var))
 
+        fallback_var = tk.BooleanVar(value=bool(cfg.get("tts_fallback", True)))
+        add_row("Fall back to other engines on failure", ttk.Checkbutton(frame, variable=fallback_var))
+
+        piper_voice_var = tk.StringVar(value=cfg.get("piper_voice", "en_US-joe-medium"))
+        piper_box = ttk.Combobox(frame, textvariable=piper_voice_var, width=28)
+        piper_box.config(values=cfg.get("piper_voices") or [])
+        if "piper" in MODE_LABELS.values():
+            # Editable: typing a new name (e.g. en_GB-alba-medium) downloads it.
+            add_row("Piper voice", piper_box)
+
         for i, (label, widget) in enumerate(rows):
             ttk.Label(frame, text=label).grid(row=i, column=0, sticky="w", padx=(0, 8), pady=3)
             widget.grid(row=i, column=1, sticky="w", pady=3)
@@ -603,6 +623,8 @@ class TwitchTTSShell:
                 "max_chars": int(float(maxchars_var.get() or 200)),
                 "special_users": special,
                 "close_to_tray": close_to_tray_var.get(),
+                "tts_fallback": fallback_var.get(),
+                "piper_voice": piper_voice_var.get().strip() or "en_US-joe-medium",
                 "audio": {
                     "volume": max(0.0, min(1.0, volume_var.get() / 100.0)),
                     "muted": muted_var.get(),

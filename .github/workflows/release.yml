@@ -24,14 +24,30 @@ jobs:
       - name: Build exe
         shell: cmd
         run: call build.bat
-      - name: Smoke test (exe starts the engine)
+      - name: Smoke test (engine starts, Piper synthesizes offline)
         shell: pwsh
         run: |
           $p = Start-Process dist\twitchTTS.exe -ArgumentList "--engine" -PassThru
-          Start-Sleep -Seconds 25
-          $ok = -not $p.HasExited
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          if (-not $ok) { throw "engine exited early (code $($p.ExitCode))" }
+          $api = "http://127.0.0.1:8080"
+          $cfg = $null
+          # First run downloads the default Piper voice (~60 MB).
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 3
+            if ($p.HasExited) { throw "engine exited early (code $($p.ExitCode))" }
+            try { $cfg = Invoke-RestMethod "$api/api/config" } catch { continue }
+            if ($cfg.piper_voices -contains $cfg.piper_voice) { break }
+          }
+          try {
+            if ($cfg.tts_modes -notcontains "piper") { throw "Piper missing from the exe (tts_modes: $($cfg.tts_modes))" }
+            if ($cfg.piper_voices -notcontains $cfg.piper_voice) { throw "Piper voice $($cfg.piper_voice) never installed" }
+            Invoke-RestMethod -Method Post "$api/api/voice" -ContentType "application/json" -Body '{"mode":"piper"}' | Out-Null
+            $r = Invoke-WebRequest -UseBasicParsing "$api/api/tts?text=piper%20smoke%20test"
+            $type = "$($r.Headers['Content-Type'])"
+            if ($type -ne "audio/wav" -or $r.RawContentLength -lt 10000) { throw "Piper TTS failed: $type, $($r.RawContentLength) bytes" }
+            "Piper OK: $type, $($r.RawContentLength) bytes"
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: twitchTTS-windows
