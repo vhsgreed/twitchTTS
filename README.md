@@ -5,15 +5,18 @@ tray, plays through your speakers — made for stream overlays and local
 monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.7-green)
+![Version](https://img.shields.io/badge/version-0.3.0-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-important)
 
 ## Features
 
 - **Anonymous Twitch IRC** — no Twitch developer account or tokens needed
-- **Two TTS engines** — cloud neural voices via [edge-tts](https://github.com/rany2/edge-tts)
-  (default, needs internet) or fully offline Windows SAPI voices; switch live
-  in the app
+- **Three TTS engines** — cloud neural voices via [edge-tts](https://github.com/rany2/edge-tts)
+  (default, needs internet), offline neural voices via
+  [Piper](https://github.com/OHF-Voice/piper1-gpl) (Windows and Linux), or
+  offline Windows SAPI voices; switch live in the app
+- **Automatic fallback** — when edge-tts fails (no internet, or Microsoft
+  rejecting the client), messages are spoken with Piper instead of dropped
 - **Desktop app (Windows, Linux)** — control panel with mute/skip, voice + engine selector,
   volume, now-playing, live log, and an Options page for configuration
 - **Minimizable** to tray!
@@ -68,7 +71,7 @@ your channel in `config.json` (auto-created from `config.example.json`):
 |---|---|
 | **Mute / Skip** | Mute host audio / skip the current message |
 | **Voice** | Select the active voice (neural or system) |
-| **Engine** | Switch between Neural (edge-tts, cloud) and System (SAPI, offline) |
+| **Engine** | Switch between Neural (edge-tts, cloud), Piper (offline) and System (SAPI, offline, Windows) |
 | **Volume** | Vertical slider; adjusts host playback volume |
 | **Now Playing** | Current message + queue depth |
 | **Engine Log** | Real-time status |
@@ -99,14 +102,32 @@ instead of by hand.
 |---|---|---|
 | `twitch_channel` | `your_channel_name` | Target Twitch channel |
 | `http_port` / `stream_port` | `8080` / `8081` | API / SSE stream ports |
-| `tts_voice` | `en-US-JennyNeural` | Default voice |
-| `tts_mode` | `edge` | `edge` (cloud) or `system` (offline SAPI) |
+| `tts_voice` | `en-US-JennyNeural` | edge-tts voice |
+| `tts_mode` | `edge` | `edge` (cloud), `piper` (offline neural) or `system` (offline SAPI, Windows) |
+| `tts_fallback` | `true` | When the active engine fails, try the others (edge -> Piper -> SAPI) |
+| `piper_voice` | `en_US-joe-medium` | Piper voice; any name from the [voice list](https://huggingface.co/rhasspy/piper-voices) |
+| `system_voice` | `""` | Windows SAPI voice; empty = Windows default |
+| `piper_auto_download` | `true` | Download the Piper voice (~60 MB) on first run |
 | `command_prefix` | `!tts` | Prefix for speech-eligible messages |
 | `special_users` | `[]` | Users who speak without prefix and bypass cooldown |
 | `cooldown_seconds` | `3` | Per-user cooldown between messages |
 | `max_chars` | `200` | Max accepted message length |
 | `close_to_tray` | `true` | Close button minimizes to tray |
 | `audio.*` | `enabled: true, volume: 0.8, muted: false, queue_size: 50` | Host playback |
+
+## Offline voices (Piper)
+
+Piper runs on the CPU (about 0.15 s for a 100-character message on a
+laptop-class CPU) and needs no internet once its voice is downloaded. The
+first start downloads `piper_voice` (~60 MB) into `piper-voices/` next to
+`config.json`. To change voice, pick a name from the
+[voice list](https://huggingface.co/rhasspy/piper-voices) and enter it under
+**Options...**: set Engine to Piper, then type the name under Voice; it
+downloads on save.
+
+Voices carry their own dataset licenses. The default, `en_US-joe-medium`, is
+CC0. Some voices (for example `ryan`, `hfc_*`) are CC BY-NC-SA, i.e. not for
+monetized streams; check the voice's `MODEL_CARD` before using it.
 
 ## Chat commands
 
@@ -166,6 +187,7 @@ ssh -L 8080:localhost:8080 -L 8081:localhost:8081 user@server
 - `audio.py` — `AudioPlayer` queue thread (pygame-ce) with skip/clear, live
   volume/mute, and 5 ms fade in/out
 - `emotes.py` / `sanitize.py` — BTTV/FFZ/7TV emote loading and text cleaning
+- `piper_engine.py` — optional Piper engine: voice download, loading, WAV synthesis
 - `config.py` — config path resolution (repo dir for source, `%APPDATA%` for exe)
 - `twitchtts_app.py` — tray shell / control window; single-instance guard
 
@@ -175,8 +197,10 @@ API routes (loopback-only): `/api/voices`, `/api/tts`, `/api/config` (GET/POST),
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md). Bundled dependencies and their licenses
-are listed in [THIRD-PARTY-SOFTWARE.md](THIRD-PARTY-SOFTWARE.md).
+Source code: MIT — see [LICENSE.md](LICENSE.md). The Windows exe bundles
+piper-tts (GPL-3.0-or-later) and is therefore distributed under the GPL-3.0.
+Bundled dependencies and their licenses are listed in
+[THIRD-PARTY-SOFTWARE.md](THIRD-PARTY-SOFTWARE.md).
 
 ## Links
 

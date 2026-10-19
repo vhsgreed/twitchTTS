@@ -136,8 +136,9 @@
                 const response = await fetch('api/config', { cache: 'no-store' });
                 if (response.ok) {
                     appConfig = await response.json();
-                    if (appConfig.tts_voice) {
-                        settings.serverVoice = appConfig.tts_voice;
+                    const active = appConfig.active_voice ?? appConfig.tts_voice;
+                    if (active) {
+                        settings.serverVoice = active;
                     }
                 }
             } catch (error) {
@@ -484,6 +485,9 @@
 
                 if (data.type === 'voice') {
                     if (data.voice) {
+                        // A "voices" event follows an engine switch and
+                        // reselects this from settings.
+                        settings.serverVoice = data.voice;
                         serverVoiceSelect.value = data.voice;
                     }
                     return;

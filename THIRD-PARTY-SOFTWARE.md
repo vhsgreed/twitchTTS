@@ -14,6 +14,24 @@ accordance with their terms.
 | [pystray](https://github.com/moses-palmer/pystray) | MIT | System tray icon |
 | [Pillow](https://github.com/python-pillow/Pillow) | HPND (MIT-like) | Tray icon drawing |
 | [miniaudio](https://github.com/irmen/miniaudio) | MIT (public domain core) | MP3 decoding for host audio |
+| [piper-tts](https://github.com/OHF-Voice/piper1-gpl) | **GPL-3.0-or-later** (bundles espeak-ng data, GPL-3.0) | Offline neural speech synthesis |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime) | MIT | Runs Piper voice models |
+| [NumPy](https://github.com/numpy/numpy) | BSD-3-Clause | Audio arrays in Piper |
+
+Piper voice models are downloaded at runtime, not bundled. Each has its own
+dataset license (see its `MODEL_CARD` on Hugging Face); the default
+`en_US-joe-medium` is CC0.
+
+## GPL notice (Windows exe)
+
+The `twitchTTS.exe` release binary bundles piper-tts, which is licensed
+under the GNU GPL v3 or later. The binary as a whole is therefore
+distributed under the terms of the GPL-3.0; this project's own source code
+remains MIT-licensed. The complete corresponding source is this repository
+plus the unmodified upstream packages listed above. Running from source
+without piper-tts installed involves no GPL code.
+
+- GPL-3.0: <https://www.gnu.org/licenses/gpl-3.0.txt>
 
 ## LGPL notices
 
@@ -27,7 +45,7 @@ LGPL. In particular:
   - LGPL-2.1: <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt>
 - Source code for the LGPL components is available from their upstream
   repositories listed above, and this project's source is public at
-  <https://github.com/karlsune/twitchTTS>, satisfying the requirement to
+  <https://github.com/vhsgreed/twitchTTS>, satisfying the requirement to
   permit relinking/replacing the libraries.
 - No modifications are made to the LGPL components; they are used
   unmodified via their public APIs.

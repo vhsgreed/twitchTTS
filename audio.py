@@ -32,9 +32,23 @@ MIXER_CHANNELS = 1
 # whenever a Channel starts playing, regardless of the buffer contents
 # (measured: an all-silence WAV still "plays" a 0.7-amplitude burst at
 # start). The channel is kept at volume 0 for this window and then faded
-# in, so the burst never reaches the speakers. TTS clips start with
-# 200-400 ms of leading silence, so the guard cuts nothing audible.
+# in, so the burst never reaches the speakers. edge-tts clips start with
+# 120-140 ms of silence, but Piper speaks after ~40 ms, so the guard cut the
+# first syllable ("hello" -> "llo"). _pad_lead() therefore guarantees
+# MIN_LEAD_MS of silence before speech, padding only clips that lack it.
 BURST_GUARD_MS = 80
+MIN_LEAD_MS = BURST_GUARD_MS + 40
+SILENCE_LEVEL = 330  # ~1% of full scale; quieter samples count as silence
+
+
+def _pad_lead(data: array.array, sample_rate: int, channels: int) -> array.array:
+    """Prepend silence so speech starts at least MIN_LEAD_MS into the clip."""
+    first = next((i for i, x in enumerate(data) if abs(x) > SILENCE_LEVEL), len(data))
+    lead = first // channels
+    need = int(sample_rate * MIN_LEAD_MS / 1000) - lead
+    if need <= 0:
+        return data
+    return array.array("h", bytes(2 * need * channels)) + data
 
 
 def _apply_fades(pcm: bytes, sample_rate: int, channels: int) -> bytes:
@@ -86,7 +100,8 @@ def _mp3_to_pcm(mp3_bytes: bytes) -> bytes:
         nchannels=channels,
         sample_rate=rate,
     )
-    return _apply_fades(decoded.samples, decoded.sample_rate, decoded.nchannels)
+    samples = _pad_lead(decoded.samples, decoded.sample_rate, decoded.nchannels)
+    return _apply_fades(samples, decoded.sample_rate, decoded.nchannels)
 
 
 class AudioPlayer:

@@ -9,6 +9,9 @@
   "cooldown_seconds": 3,
   "max_chars": 200,
   "tts_mode": "edge",
+  "tts_fallback": true,
+  "piper_voice": "en_US-joe-medium",
+  "piper_auto_download": true,
   "close_to_tray": true,
   "audio": {
     "enabled": true,

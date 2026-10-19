@@ -6,11 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
 ### Added
 
+- Piper offline neural voices as a third engine ("Piper (offline)"), on
+  Windows (bundled in the exe) and Linux. The default voice,
+  `en_US-joe-medium` (CC0), downloads on first start (~60 MB).
+- Automatic fallback: when edge-tts fails, the message is spoken with Piper
+  (then Windows SAPI) instead of being dropped, and edge-tts is retried a
+  minute later. Turn off with `tts_fallback: false` or in Options.
+- Each engine keeps its own voice (`tts_voice` for edge-tts, `piper_voice`,
+  `system_voice` for SAPI); switching engine switches to that engine's voice.
+- Options: "Engine" then "Voice" (the list follows the chosen engine), and
+  "Fall back to other engines on failure".
 - A daily GitHub Actions workflow checks that neural voices still
   synthesize with the newest edge-tts and raises the `edge-tts>=` pin in
   the requirements files and README when a newer release passes.
+
+### Changed
+
+- The Windows exe bundles piper-tts (GPL-3.0-or-later), so the exe is
+  distributed under the GPL-3.0; the source stays MIT. It grew from about
+  31 MB to about 90 MB (Piper and ONNX Runtime).
+- The main window shows Engine before Voice.
+
+### Fixed
+
+- Switching engine left the Voice menu on the old engine's voice (e.g.
+  `en-US-JennyNeural` while Piper spoke `en_US-joe-medium`).
+- Linux: the window opened too narrow, hiding the volume slider and
+  squeezing the engine dropdown. It now sizes itself to its controls.
+- Host audio: the first syllable of Piper messages was cut off ("hello" ->
+  "llo"). The 80 ms start-of-playback mute assumed every clip starts with
+  silence; clips that start sooner are now padded first.
 
 ## [0.2.7] - 2026-10-18
 
