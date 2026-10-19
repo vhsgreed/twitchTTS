@@ -167,7 +167,7 @@ class TwitchTTSShell:
             self.root.iconphoto(True, self._window_icon)
         except Exception:
             pass  # cosmetic only
-        self.root.geometry("560x440")
+        # Final size is set after the widgets exist (see _fit_window).
         self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
 
         pad = {"padx": 8, "pady": 4}
@@ -208,6 +208,10 @@ class TwitchTTSShell:
         body = ttk.Frame(frame)
         body.pack(fill="both", expand=True, **pad)
 
+        # Packed before `left` so a narrow window squeezes the log, not the slider.
+        right = ttk.Frame(body)
+        right.pack(side="right", fill="y", padx=(10, 0))
+
         left = ttk.Frame(body)
         left.pack(side="left", fill="both", expand=True)
 
@@ -227,8 +231,6 @@ class TwitchTTSShell:
         scroll.pack(side="right", fill="y")
         self.log_text.config(yscrollcommand=scroll.set)
 
-        right = ttk.Frame(body)
-        right.pack(side="right", fill="y", padx=(10, 0))
         ttk.Label(right, text="Volume").pack()
         self.volume_var = tk.DoubleVar(value=80)
         self.volume_scale = ttk.Scale(
@@ -249,6 +251,18 @@ class TwitchTTSShell:
         self.status_label = ttk.Label(bottom, text="● offline", foreground="#8c8c8c")
         self.status_label.pack(side="left", padx=(8, 0))
         ttk.Button(bottom, text="Options...", command=self._open_options, width=10).pack(side="right")
+        self._fit_window()
+
+    def _fit_window(self) -> None:
+        """Size the window to its widgets instead of a fixed 560 px.
+
+        Linux Tk fonts are wider than Segoe UI on Windows, so a fixed width
+        clipped the volume slider and the engine dropdown there.
+        """
+        self.root.update_idletasks()
+        width = max(560, self.root.winfo_reqwidth() + 24)  # a little slack
+        self.root.geometry(f"{width}x440")
+        self.root.minsize(width, 360)
 
     def hide_window(self) -> None:
         self.root.withdraw()

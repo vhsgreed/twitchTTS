@@ -16,6 +16,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   minute later. Turn off with `tts_fallback: false` or in Options.
 - Options: "Fall back to other engines on failure" and "Piper voice".
 
+### Fixed
+
+- Linux: the window opened too narrow, hiding the volume slider and
+  squeezing the engine dropdown. It now sizes itself to its controls.
+
 - A daily GitHub Actions workflow checks that neural voices still
   synthesize with the newest edge-tts and raises the `edge-tts>=` pin in
   the requirements files and README when a newer release passes.
