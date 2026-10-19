@@ -5,7 +5,7 @@ tray, plays through your speakers — made for stream overlays and local
 monitoring.
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.7-green)
+![Version](https://img.shields.io/badge/version-0.3.0-green)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-important)
 
 ## Features
@@ -102,10 +102,11 @@ instead of by hand.
 |---|---|---|
 | `twitch_channel` | `your_channel_name` | Target Twitch channel |
 | `http_port` / `stream_port` | `8080` / `8081` | API / SSE stream ports |
-| `tts_voice` | `en-US-JennyNeural` | Default voice |
+| `tts_voice` | `en-US-JennyNeural` | edge-tts voice |
 | `tts_mode` | `edge` | `edge` (cloud), `piper` (offline neural) or `system` (offline SAPI, Windows) |
 | `tts_fallback` | `true` | When the active engine fails, try the others (edge -> Piper -> SAPI) |
 | `piper_voice` | `en_US-joe-medium` | Piper voice; any name from the [voice list](https://huggingface.co/rhasspy/piper-voices) |
+| `system_voice` | `""` | Windows SAPI voice; empty = Windows default |
 | `piper_auto_download` | `true` | Download the Piper voice (~60 MB) on first run |
 | `command_prefix` | `!tts` | Prefix for speech-eligible messages |
 | `special_users` | `[]` | Users who speak without prefix and bypass cooldown |
@@ -121,7 +122,8 @@ laptop-class CPU) and needs no internet once its voice is downloaded. The
 first start downloads `piper_voice` (~60 MB) into `piper-voices/` next to
 `config.json`. To change voice, pick a name from the
 [voice list](https://huggingface.co/rhasspy/piper-voices) and enter it under
-**Options... -> Piper voice**; it downloads on save.
+**Options...**: set Engine to Piper, then type the name under Voice; it
+downloads on save.
 
 Voices carry their own dataset licenses. The default, `en_US-joe-medium`, is
 CC0. Some voices (for example `ryan`, `hfc_*`) are CC BY-NC-SA, i.e. not for
@@ -195,8 +197,10 @@ API routes (loopback-only): `/api/voices`, `/api/tts`, `/api/config` (GET/POST),
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md). Bundled dependencies and their licenses
-are listed in [THIRD-PARTY-SOFTWARE.md](THIRD-PARTY-SOFTWARE.md).
+Source code: MIT — see [LICENSE.md](LICENSE.md). The Windows exe bundles
+piper-tts (GPL-3.0-or-later) and is therefore distributed under the GPL-3.0.
+Bundled dependencies and their licenses are listed in
+[THIRD-PARTY-SOFTWARE.md](THIRD-PARTY-SOFTWARE.md).
 
 ## Links
 

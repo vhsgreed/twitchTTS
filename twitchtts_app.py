@@ -34,7 +34,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.2.7"
+VERSION = "0.3.0"
 
 def _piper_installed() -> bool:
     try:
@@ -180,14 +180,6 @@ class TwitchTTSShell:
         self.mute_btn.pack(side="left", padx=(0, 6))
         ttk.Button(controls, text="Skip", command=self.skip, width=8).pack(side="left", padx=(0, 12))
 
-        ttk.Label(controls, text="Voice:").pack(side="left")
-        self.voice_var = tk.StringVar()
-        self.voice_box = ttk.Combobox(
-            controls, textvariable=self.voice_var, state="readonly", width=28
-        )
-        self.voice_box.pack(side="left", padx=6)
-        self.voice_box.bind("<<ComboboxSelected>>", self._voice_selected)
-
         ttk.Label(controls, text="Engine:").pack(side="left")
         self.mode_var = tk.StringVar()
         self.mode_box = ttk.Combobox(
@@ -204,6 +196,15 @@ class TwitchTTSShell:
             # empty collapsed popdown on Linux Tk, so show it read-only.
             self.mode_box.config(state="disabled")
         self.mode_box.bind("<<ComboboxSelected>>", self._mode_selected)
+
+        # Voice comes after Engine: its list depends on the engine.
+        ttk.Label(controls, text="Voice:").pack(side="left")
+        self.voice_var = tk.StringVar()
+        self.voice_box = ttk.Combobox(
+            controls, textvariable=self.voice_var, state="readonly", width=28
+        )
+        self.voice_box.pack(side="left", padx=6)
+        self.voice_box.bind("<<ComboboxSelected>>", self._voice_selected)
 
         body = ttk.Frame(frame)
         body.pack(fill="both", expand=True, **pad)
@@ -405,8 +406,9 @@ class TwitchTTSShell:
             mode = evt.get("mode")
             if mode:
                 self.root.after(0, lambda m=mode: self._set_mode_var(m))
-                self.root.after(0, self._load_voices)
-            if voice:
+                # Reload the list for this engine; it preselects the voice.
+                threading.Thread(target=self._load_voices, daemon=True).start()
+            elif voice:
                 self.root.after(0, lambda v=voice: self._select_voice(v))
         elif etype == "voices":
             voices = evt.get("voices") or []
@@ -453,8 +455,9 @@ class TwitchTTSShell:
     def _mode_selected(self, _event=None) -> None:
         key = MODE_LABELS.get(self.mode_var.get(), "edge")
         self._post("/api/voice", {"mode": key})
-        # Engine switched mode; reload the matching voice list.
-        self.root.after(300, self._load_voices)
+        # The engine's "voice" event reloads the matching voice list; this
+        # covers an engine too old to send one.
+        threading.Thread(target=self._load_voices, daemon=True).start()
 
     def _volume_drag(self, _value=None) -> None:
         self.volume_label.config(text=f"{int(self.volume_var.get())}%")
@@ -487,19 +490,20 @@ class TwitchTTSShell:
             label = v.get("label") or name
             by_label[label] = name
             options.append(label)
-        if not options:
-            return
         self._voice_by_label = by_label
         self.root.after(0, lambda: self.voice_box.config(values=options))
-        # Preselect the engine's current voice.
+        # Show the voice the active engine really uses (each engine keeps
+        # its own voice, so this is never another engine's voice name).
         cfg = self._api("/api/config")
         if cfg:
-            current = cfg.get("tts_voice")
-            if current:
-                self.root.after(0, lambda c=current: self._select_voice(c))
+            current = cfg.get("active_voice", cfg.get("tts_voice", ""))
+            self.root.after(0, lambda c=current: self._select_voice(c))
             self.root.after(0, lambda m=cfg.get("tts_mode", "edge"): self._set_mode_var(m))
 
     def _select_voice(self, name: str) -> None:
+        if not name:
+            self.voice_var.set("(system default)")
+            return
         for label, voice in self._voice_by_label.items():
             if voice == name:
                 self.voice_var.set(label)
@@ -540,24 +544,62 @@ class TwitchTTSShell:
         channel_var = tk.StringVar(value=cfg.get("twitch_channel", ""))
         add_row("Twitch channel", ttk.Entry(frame, textvariable=channel_var, width=28))
 
-        voice_var = tk.StringVar(value=cfg.get("tts_voice", ""))
+        # Engine first, then a voice from that engine's list. Each engine
+        # keeps its own voice (tts_voice / piper_voice / system_voice).
+        voice_keys = {"edge": "tts_voice", "piper": "piper_voice", "system": "system_voice"}
+        chosen = {mode: str(cfg.get(key) or "") for mode, key in voice_keys.items()}
+        if not chosen["piper"]:
+            chosen["piper"] = "en_US-joe-medium"
+        start_mode = cfg.get("tts_mode", "edge")
+        engine_var = tk.StringVar(value=MODE_KEYS.get(start_mode, next(iter(MODE_LABELS))))
+        engine_box = ttk.Combobox(
+            frame, textvariable=engine_var, state="readonly", width=28,
+            values=list(MODE_LABELS.keys()),
+        )
+        add_row("Engine", engine_box)
+
+        voice_var = tk.StringVar()
         voice_box = ttk.Combobox(frame, textvariable=voice_var, state="readonly", width=28)
         by_label: dict[str, str] = {}
-        voice_options = []
-        for v in voices:
-            if not isinstance(v, dict):
-                continue
-            name = v.get("name") or v.get("ShortName")
-            if not name:
-                continue
-            label = v.get("label") or name
-            by_label[label] = name
-            voice_options.append(label)
-        voice_box.config(values=voice_options)
-        for label, name in by_label.items():
-            if name == voice_var.get():
-                voice_var.set(label)
-        add_row("Neural voice", voice_box)
+        voice_cache: dict[str, list] = {start_mode: voices}
+        current_mode = {"key": None}
+        add_row("Voice", voice_box)
+        voice_hint = ttk.Label(frame, text="", foreground="#666666")
+
+        def remember_voice() -> None:
+            mode = current_mode["key"]
+            if mode:
+                text = voice_var.get().strip()
+                chosen[mode] = by_label.get(text, "" if text == "(system default)" else text)
+
+        def show_engine(_event=None) -> None:
+            remember_voice()
+            mode = MODE_LABELS.get(engine_var.get(), "edge")
+            current_mode["key"] = mode
+            if mode not in voice_cache:
+                voice_cache[mode] = self._api(f"/api/voices?mode={mode}", timeout=25.0) or []
+            by_label.clear()
+            options = []
+            for v in voice_cache[mode]:
+                if not isinstance(v, dict) or not v.get("name"):
+                    continue
+                label = v.get("label") or v["name"]
+                by_label[label] = v["name"]
+                options.append(label)
+            if mode == "system":
+                options.insert(0, "(system default)")
+            voice_box.config(values=options, state="normal" if mode == "piper" else "readonly")
+            want = chosen.get(mode, "")
+            label = next((lb for lb, n in by_label.items() if n == want), None)
+            if label is None and mode == "edge" and options:
+                label = next((lb for lb in options if lb.startswith("en-US-JennyNeural")), options[0])
+            voice_var.set(label or want or ("(system default)" if mode == "system" else ""))
+            voice_hint.config(
+                text="Type any Piper voice name to download it (e.g. en_GB-alba-medium)."
+                if mode == "piper" else ""
+            )
+
+        engine_box.bind("<<ComboboxSelected>>", show_engine)
 
         prefix_var = tk.StringVar(value=cfg.get("command_prefix", "!tts"))
         prefix_entry = ttk.Entry(frame, textvariable=prefix_var, width=28)
@@ -601,16 +643,16 @@ class TwitchTTSShell:
         fallback_var = tk.BooleanVar(value=bool(cfg.get("tts_fallback", True)))
         add_row("Fall back to other engines on failure", ttk.Checkbutton(frame, variable=fallback_var))
 
-        piper_voice_var = tk.StringVar(value=cfg.get("piper_voice", "en_US-joe-medium"))
-        piper_box = ttk.Combobox(frame, textvariable=piper_voice_var, width=28)
-        piper_box.config(values=cfg.get("piper_voices") or [])
-        if "piper" in MODE_LABELS.values():
-            # Editable: typing a new name (e.g. en_GB-alba-medium) downloads it.
-            add_row("Piper voice", piper_box)
-
-        for i, (label, widget) in enumerate(rows):
-            ttk.Label(frame, text=label).grid(row=i, column=0, sticky="w", padx=(0, 8), pady=3)
-            widget.grid(row=i, column=1, sticky="w", pady=3)
+        grid_row = 0
+        for label, widget in rows:
+            ttk.Label(frame, text=label).grid(row=grid_row, column=0, sticky="w", padx=(0, 8), pady=3)
+            widget.grid(row=grid_row, column=1, sticky="w", pady=3)
+            grid_row += 1
+            if widget is voice_box:
+                voice_hint.grid(row=grid_row, column=1, sticky="w")
+                grid_row += 1
+        rows = [None] * grid_row  # later rows are placed after these
+        show_engine()
 
         ttk.Label(
             frame,
@@ -628,9 +670,13 @@ class TwitchTTSShell:
 
         def collect() -> dict:
             special = [u.strip() for u in special_var.get().split(",") if u.strip()]
+            remember_voice()
             return {
                 "twitch_channel": channel_var.get().strip(),
-                "tts_voice": by_label.get(voice_var.get(), voice_var.get()),
+                "tts_mode": current_mode["key"] or "edge",
+                "tts_voice": chosen["edge"] or cfg.get("tts_voice", "en-US-JennyNeural"),
+                "system_voice": chosen["system"],
+                "piper_voice": chosen["piper"].strip() or "en_US-joe-medium",
                 "command_prefix": prefix_var.get().strip() or "!tts",
                 "require_prefix": require_prefix_var.get(),
                 "cooldown_seconds": int(float(cooldown_var.get() or 0)),
@@ -638,7 +684,6 @@ class TwitchTTSShell:
                 "special_users": special,
                 "close_to_tray": close_to_tray_var.get(),
                 "tts_fallback": fallback_var.get(),
-                "piper_voice": piper_voice_var.get().strip() or "en_US-joe-medium",
                 "audio": {
                     "volume": max(0.0, min(1.0, volume_var.get() / 100.0)),
                     "muted": muted_var.get(),
@@ -667,6 +712,8 @@ class TwitchTTSShell:
                 )
                 return False
             self._log("Options saved.")
+            # Engine or voice may have changed: resync the main window.
+            threading.Thread(target=self._load_voices, daemon=True).start()
             return True
 
         def on_save() -> None:

@@ -134,11 +134,42 @@ if mode_unsupported(TTS_MODE):
 # TTS_MODES order (edge -> Piper -> SAPI) instead of dropping the message.
 TTS_FALLBACK = bool(CONFIG.get("tts_fallback", True))
 PIPER_VOICE = str(CONFIG.get("piper_voice") or piper_engine.DEFAULT_VOICE)
+# SAPI voice name; empty means the Windows default voice.
+SYSTEM_VOICE = str(CONFIG.get("system_voice") or "")
 PIPER_AUTO_DOWNLOAD = bool(CONFIG.get("piper_auto_download", True))
 # After an edge-tts failure, skip it for this long so every queued message
 # does not wait on a dead service before falling back.
 EDGE_RETRY_SECONDS = 60
 edge_down_until = 0.0
+
+
+# Each engine keeps its own voice: names are engine-specific, so switching
+# engine must never carry an edge-tts name into Piper or SAPI (or back).
+# server_voice is the edge-tts voice; PIPER_VOICE and SYSTEM_VOICE the others.
+def voice_for(mode: str) -> str:
+    if mode == "piper":
+        return PIPER_VOICE
+    if mode == "system":
+        return SYSTEM_VOICE
+    return server_voice
+
+
+def current_voice() -> str:
+    """The voice the active engine speaks with."""
+    return voice_for(TTS_MODE)
+
+
+def set_voice_for(mode: str, voice: str) -> None:
+    global server_voice, PIPER_VOICE, SYSTEM_VOICE
+    if mode == "piper":
+        if voice != PIPER_VOICE:
+            PIPER_VOICE = voice
+            threading.Thread(target=prepare_piper, name="piper-prepare", daemon=True).start()
+    elif mode == "system":
+        SYSTEM_VOICE = voice
+    else:
+        server_voice = voice
+
 
 system_voices_cache: list[dict] | None = None
 system_voices_lock = threading.Lock()
@@ -208,7 +239,15 @@ def canonical_voice(name: str) -> str | None:
 def resolve_voice(user: str) -> str:
     """The voice to use for a user's message: personal override or default."""
     with user_voices_lock:
-        return user_voices.get(user.lower()) or server_voice
+        override = user_voices.get(user.lower())
+    if override:
+        try:
+            names = {v.get("name") for v in get_active_voices() if isinstance(v, dict)}
+        except Exception:  # noqa: BLE001 - voice list unavailable, use the default
+            names = set()
+        if override in names:
+            return override
+    return current_voice()
 
 
 def handle_voice_command(user: str, arg: str) -> None:
@@ -220,7 +259,7 @@ def handle_voice_command(user: str, arg: str) -> None:
         return
     key = user.lower()
     if not arg or arg.lower() in ("status", "?"):
-        current = user_voices.get(key) or DEFAULT_TTS_VOICE
+        current = user_voices.get(key) or current_voice()
         app_log(f"Voice for {user}: {current}")
         return
     if arg.lower() in ("reset", "default", "off"):
@@ -441,7 +480,7 @@ async def generate_edge_tts(text: str, voice: str) -> bytes:
     """Synthesize MP3 bytes with edge-tts (cloud)."""
     if not voice or not voice.endswith("Neural"):
         # Fallback from another engine: its voice names mean nothing here.
-        voice = DEFAULT_TTS_VOICE if DEFAULT_TTS_VOICE.endswith("Neural") else "en-US-JennyNeural"
+        voice = server_voice if server_voice.endswith("Neural") else "en-US-JennyNeural"
     communicate = edge_tts.Communicate(text, voice)
     audio = bytearray()
     async for chunk in communicate.stream():
@@ -496,8 +535,8 @@ def generate_tts_audio_sync(text: str, voice: str) -> bytes:
         if mode == "edge" and len(chain) > 1 and time.time() < edge_down_until:
             continue
         try:
-            # Voice names are engine-specific: fallbacks use their own default.
-            audio = TTS_ENGINES[mode](text, voice if mode == TTS_MODE else "")
+            # Voice names are engine-specific: fallbacks use their own voice.
+            audio = TTS_ENGINES[mode](text, voice if mode == TTS_MODE else voice_for(mode))
         except Exception as exc:  # noqa: BLE001 - any failure moves down the chain
             if mode == "edge":
                 edge_down_until = time.time() + EDGE_RETRY_SECONDS
@@ -622,13 +661,18 @@ def generate_system_tts(text: str, voice: str) -> bytes:
     return base64.b64decode(proc.stdout.strip())
 
 
-def get_active_voices() -> list[dict]:
-    """The voice list for the active TTS mode."""
-    if TTS_MODE == "system":
-        return list_system_voices()
-    if TTS_MODE == "piper":
+def get_voices_for(mode: str) -> list[dict]:
+    """The voice list for one TTS engine."""
+    if mode == "system":
+        return list_system_voices() if os.name == "nt" else []
+    if mode == "piper":
         return piper_engine.list_voices()
     return get_cached_voices()
+
+
+def get_active_voices() -> list[dict]:
+    """The voice list for the active TTS mode."""
+    return get_voices_for(TTS_MODE)
 
 
 async def list_voices() -> list[dict]:
@@ -1001,7 +1045,7 @@ def start_http_server() -> None:
                 self._handle_tts_request(parsed)
                 return
             if parsed.path == "/api/voices":
-                self._handle_voices_request()
+                self._handle_voices_request(parsed)
                 return
             if parsed.path == "/api/status":
                 now = time.time()
@@ -1058,10 +1102,14 @@ def start_http_server() -> None:
                 return
             self.send_error(404, "Not found")
 
-        def _handle_voices_request(self):
-            """Return the voice list for the active TTS mode as JSON."""
+        def _handle_voices_request(self, parsed):
+            """Voice list as JSON: the active engine's, or ?mode=edge|piper|system."""
+            mode = urllib.parse.parse_qs(parsed.query).get("mode", [TTS_MODE])[0].lower()
+            if mode not in TTS_MODES:
+                self.send_error(400, f"Unknown TTS mode: {mode}")
+                return
             try:
-                voices = get_active_voices()
+                voices = get_voices_for(mode)
             except Exception as exc:
                 app_log(f"Failed to load voices: {exc}", level="error")
                 self.send_error(500, "Failed to load voices")
@@ -1076,6 +1124,8 @@ def start_http_server() -> None:
                     "http_port": HTTP_PORT,
                     "stream_port": STREAM_PORT,
                     "tts_voice": server_voice,
+                    "active_voice": current_voice(),
+                    "system_voice": SYSTEM_VOICE,
                     "tts_mode": TTS_MODE,
                     "tts_modes": [m for m in TTS_MODES if mode_unsupported(m) is None],
                     "tts_fallback": TTS_FALLBACK,
@@ -1099,7 +1149,7 @@ def start_http_server() -> None:
 
         def _handle_voice_request(self):
             """Set the voice (and optionally the TTS engine mode) for host audio."""
-            global server_voice, TTS_MODE
+            global TTS_MODE
             body = self._read_json_body()
             if not isinstance(body, dict):
                 self.send_error(400, "Missing voice parameter")
@@ -1118,12 +1168,12 @@ def start_http_server() -> None:
                 if not voice:
                     self.send_error(400, "Missing voice parameter")
                     return
-                server_voice = voice
+                set_voice_for(TTS_MODE, voice)
 
-            app_log(f"Host audio: mode={TTS_MODE}, voice={server_voice}")
+            app_log(f"Host audio: engine={ENGINE_NAMES[TTS_MODE]}, voice={current_voice() or 'default'}")
             if main_loop and main_loop.is_running():
                 asyncio.run_coroutine_threadsafe(
-                    broadcast(json.dumps({"type": "voice", "voice": server_voice, "mode": TTS_MODE})),
+                    broadcast(json.dumps({"type": "voice", "voice": current_voice(), "mode": TTS_MODE})),
                     main_loop,
                 )
                 if mode_changed:
@@ -1131,11 +1181,11 @@ def start_http_server() -> None:
                         broadcast(json.dumps({"type": "voices", "voices": get_active_voices()})),
                         main_loop,
                     )
-            self._send_json({"voice": server_voice, "mode": TTS_MODE})
+            self._send_json({"voice": current_voice(), "mode": TTS_MODE})
 
         def _handle_config_save(self):
             """Persist configuration and apply the runtime-only parts immediately."""
-            global CONFIG, server_voice, TTS_MODE, TTS_FALLBACK, PIPER_VOICE
+            global CONFIG, server_voice, TTS_MODE, TTS_FALLBACK, PIPER_VOICE, SYSTEM_VOICE
             global TWITCH_CHANNEL, COMMAND_PREFIX, REQUIRE_PREFIX, SPECIAL_USERS
             global COOLDOWN_SECONDS, MAX_CHARS, QUEUE_SIZE, AUDIO_ENABLED_BY_DEFAULT
             body = self._read_json_body()
@@ -1197,23 +1247,29 @@ def start_http_server() -> None:
                 AUDIO_ENABLED_BY_DEFAULT = bool(merged_audio.get("enabled", AUDIO_ENABLED_BY_DEFAULT))
 
             # Settings that can apply without a restart.
+            old_mode, old_voice = TTS_MODE, current_voice()
             if isinstance(merged.get("tts_voice"), str) and merged["tts_voice"].strip():
                 server_voice = merged["tts_voice"].strip()
-                app_log(f"Voice set to {server_voice} (from saved config)")
-                if main_loop and main_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        broadcast(json.dumps({"type": "voice", "voice": server_voice, "mode": TTS_MODE})),
-                        main_loop,
-                    )
-            if isinstance(merged.get("tts_mode"), str) and not mode_unsupported(merged["tts_mode"].strip()):
-                TTS_MODE = merged["tts_mode"].strip()
-                app_log(f"TTS mode set to {TTS_MODE} (from saved config)")
-            TTS_FALLBACK = bool(merged.get("tts_fallback", TTS_FALLBACK))
+            if isinstance(merged.get("system_voice"), str):
+                SYSTEM_VOICE = merged["system_voice"].strip()
             new_piper_voice = str(merged.get("piper_voice") or PIPER_VOICE).strip()
             if new_piper_voice != PIPER_VOICE:
-                PIPER_VOICE = new_piper_voice
-                app_log(f"Piper voice set to {PIPER_VOICE}")
-                threading.Thread(target=prepare_piper, name="piper-prepare", daemon=True).start()
+                set_voice_for("piper", new_piper_voice)
+            if isinstance(merged.get("tts_mode"), str) and not mode_unsupported(merged["tts_mode"].strip()):
+                TTS_MODE = merged["tts_mode"].strip()
+            TTS_FALLBACK = bool(merged.get("tts_fallback", TTS_FALLBACK))
+            if (TTS_MODE, current_voice()) != (old_mode, old_voice):
+                app_log(f"Engine {ENGINE_NAMES[TTS_MODE]}, voice {current_voice() or 'default'} (from saved config)")
+                if main_loop and main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast(json.dumps({"type": "voice", "voice": current_voice(), "mode": TTS_MODE})),
+                        main_loop,
+                    )
+                    if TTS_MODE != old_mode:
+                        asyncio.run_coroutine_threadsafe(
+                            broadcast(json.dumps({"type": "voices", "voices": get_active_voices()})),
+                            main_loop,
+                        )
             if isinstance(audio, dict):
                 if "muted" in audio:
                     set_muted(bool(audio["muted"]))
@@ -1263,7 +1319,7 @@ def start_http_server() -> None:
             """Validate query parameters, synthesize audio, and return MP3 data."""
             params = urllib.parse.parse_qs(parsed.query)
             text = sanitize_chat_text(params.get("text", [""])[0])
-            voice = params.get("voice", [DEFAULT_TTS_VOICE])[0] or DEFAULT_TTS_VOICE
+            voice = params.get("voice", [""])[0] or current_voice()
 
             if not text:
                 self.send_error(400, "Missing or empty text parameter")
