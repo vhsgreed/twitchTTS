@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A daily GitHub Actions workflow checks that neural voices still
+  synthesize with the newest edge-tts and raises the `edge-tts>=` pin in
+  the requirements files and README when a newer release passes.
+
 ## [0.2.7] - 2026-10-18
 
 ### Fixed

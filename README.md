@@ -46,6 +46,11 @@ pip install -r requirements.txt
 python twitchtts_app.py
 ```
 
+Neural voices need `edge-tts>=7.3.1`: Microsoft's speech service rejects
+older edge-tts releases with `403 Invalid response status`. A daily
+workflow raises this pin when a newer edge-tts passes a synthesis test;
+upgrade with `pip install -U edge-tts`.
+
 Or double-click `start_tts.bat` (prefers the project venv). At minimum set
 your channel in `config.json` (auto-created from `config.example.json`):
 
