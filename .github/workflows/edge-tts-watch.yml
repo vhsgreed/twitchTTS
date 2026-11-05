@@ -29,6 +29,8 @@ jobs:
           python-version: "3.12"
       - name: Compare pin with PyPI
         id: v
+        # Explicit bash adds -o pipefail, so a crash before `| tee` fails here.
+        shell: bash
         run: python .github/scripts/edge_tts_watch.py check | tee -a "$GITHUB_OUTPUT"
       - name: Synthesis smoke test (newest edge-tts)
         run: |

@@ -7,10 +7,12 @@ Used by .github/workflows/edge-tts-watch.yml:
                and note it under [Unreleased] in CHANGELOG.md
 """
 import asyncio
+import http.client
 import json
 import pathlib
 import re
 import sys
+import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -40,9 +42,17 @@ def pinned():
     return m.group(1)
 
 
-def latest():
-    with urllib.request.urlopen("https://pypi.org/pypi/edge-tts/json", timeout=30) as r:
-        return json.load(r)["info"]["version"]
+def latest(attempts=3, delay=10):
+    # PyPI occasionally drops a connection; retry before failing the run.
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen("https://pypi.org/pypi/edge-tts/json", timeout=30) as r:
+                return json.load(r)["info"]["version"]
+        except (OSError, http.client.HTTPException) as e:
+            if i == attempts - 1:
+                sys.exit(f"PyPI lookup failed after {attempts} attempts: {e}")
+            print(f"PyPI lookup failed ({e}); retrying in {delay}s", file=sys.stderr)
+            time.sleep(delay)
 
 
 def check():
