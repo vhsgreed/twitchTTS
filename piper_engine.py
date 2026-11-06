@@ -125,13 +125,40 @@ def ensure_voice(name: str = DEFAULT_VOICE, log=None) -> bool:
         return True
 
 
+def _load_lean(model_path: str):
+    """Load a voice with onnxruntime's CPU memory arena off.
+
+    ``PiperVoice.load`` uses default session options, and the arena keeps the
+    peak buffer of every message length it has seen: RSS grew from ~140 MB to
+    ~700 MB over 40 chat-sized messages on geekom. Without the arena it levels
+    off around 300 MB for about 40 ms more per message.
+    """
+    import onnxruntime
+    from piper import PiperVoice
+    from piper.config import PiperConfig
+
+    with open(f"{model_path}.json", encoding="utf-8") as f:
+        config = PiperConfig.from_dict(json.load(f))
+    opts = onnxruntime.SessionOptions()
+    opts.enable_cpu_mem_arena = False
+    session = onnxruntime.InferenceSession(
+        model_path, sess_options=opts, providers=["CPUExecutionProvider"]
+    )
+    return PiperVoice(config=config, session=session)
+
+
 def _voice(name: str):
     with _load_lock:
         voice = _loaded.get(name)
         if voice is None:
-            from piper import PiperVoice
+            path = str(voices_dir() / f"{name}.onnx")
+            try:
+                voice = _load_lean(path)
+            except Exception:
+                # piper-tts API drift: fall back to the stock loader.
+                from piper import PiperVoice
 
-            voice = PiperVoice.load(str(voices_dir() / f"{name}.onnx"))
+                voice = PiperVoice.load(path)
             _loaded[name] = voice
         return voice
 

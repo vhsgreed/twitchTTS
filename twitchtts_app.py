@@ -34,7 +34,7 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 def _piper_installed() -> bool:
     try:

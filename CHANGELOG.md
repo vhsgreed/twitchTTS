@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-06
+
+### Fixed
+
+- Piper voices no longer grow the engine's memory over a stream. Voices load
+  with onnxruntime's CPU memory arena off, which kept a buffer for every
+  message length seen: memory went from about 140 MB to 715 MB over 40 chat
+  messages and kept climbing. It now stays around 300 MB, for roughly 40 ms
+  more per message.
+
 ## [0.3.0] - 2026-10-19
 
 ### Added
