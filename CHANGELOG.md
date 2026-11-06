@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-06
+
+### Changed
+
+- The main window title shows the version, e.g. "Twitch TTS Engine v0.3.2".
+
 ## [0.3.1] - 2026-11-06
 
 ### Fixed

@@ -34,7 +34,10 @@ from tkinter import messagebox, ttk
 
 from config import get_config_path
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
+# Main window title. The Windows single-instance guard finds the running
+# window by this exact string, so keep both uses on this constant.
+WINDOW_TITLE = f"Twitch TTS Engine v{VERSION}"
 
 def _piper_installed() -> bool:
     try:
@@ -159,7 +162,7 @@ class TwitchTTSShell:
         # the Linux .desktop launcher's StartupWMClass must match it so the
         # dock groups the window under the launcher icon.
         self.root = tk.Tk(className="twitchtts")
-        self.root.title("Twitch TTS Engine")
+        self.root.title(WINDOW_TITLE)
         try:
             from PIL import ImageTk
 
@@ -975,7 +978,7 @@ def _claim_single_instance(action: str = "open") -> bool:
         if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
             kernel32.CloseHandle(handle)
             # Bring the running instance's window to the front.
-            hwnd = user32.FindWindowW(None, "Twitch TTS Engine")
+            hwnd = user32.FindWindowW(None, WINDOW_TITLE)
             if hwnd:
                 user32.ShowWindow(hwnd, 9)  # SW_RESTORE (also un-hides)
                 user32.SetForegroundWindow(hwnd)
